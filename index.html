@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    />
+    <title>BUILD_SHA Sync</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">CATAPA Build Utility</p>
+        <h1>Sync BUILD_SHA</h1>
+        <p class="subtitle">
+          BYO token web tool to preview and update BUILD_SHA across multiple
+          .env files in CATAPA-APPS-STATE.
+        </p>
+      </header>
+
+      <section class="card">
+        <form id="sync-form">
+          <label>
+            GitHub token
+            <input
+              id="token"
+              name="token"
+              type="password"
+              placeholder="ghp_... or github_pat_..."
+              autocomplete="off"
+              required
+            />
+          </label>
+
+          <div class="grid-2">
+            <label>
+              Source repo
+              <select id="source-repo" name="sourceRepo">
+                <option value="CATAPA-EXTENSION">CATAPA-EXTENSION</option>
+                <option value="CATAPA-WEB">CATAPA-WEB</option>
+              </select>
+            </label>
+
+            <label>
+              Source branch
+              <input
+                id="source-branch"
+                name="sourceBranch"
+                type="text"
+                value="develop"
+                required
+              />
+            </label>
+          </div>
+
+          <div class="grid-2">
+            <label>
+              Target group
+              <select id="target-group" name="targetGroup">
+                <option value="CATAPA-EXTENSION">CATAPA-EXTENSION</option>
+                <option value="CATAPA-WEB">CATAPA-WEB</option>
+                <option value="ALL">ALL</option>
+              </select>
+            </label>
+
+            <label>
+              Environment scope
+              <select id="env-scope" name="envScope">
+                <option value="all">all</option>
+                <option value="dev">dev</option>
+                <option value="demo">demo</option>
+                <option value="prod">prod</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid-2">
+            <label>
+              Target branch
+              <input
+                id="target-branch"
+                name="targetBranch"
+                type="text"
+                value="main"
+                required
+              />
+            </label>
+
+            <label>
+              Mode
+              <select id="mode" name="mode">
+                <option value="pr">Create PR (recommended)</option>
+                <option value="commit">Direct commit</option>
+              </select>
+            </label>
+          </div>
+
+          <details class="advanced">
+            <summary>Advanced repo owner settings</summary>
+            <div class="grid-2 advanced-body">
+              <label>
+                Source owner
+                <input id="source-owner" type="text" value="GDP-ADMIN" required />
+              </label>
+              <label>
+                Target owner
+                <input id="target-owner" type="text" value="GDP-ADMIN" required />
+              </label>
+            </div>
+            <label>
+              Target repo
+              <input id="target-repo" type="text" value="CATAPA-APPS-STATE" required />
+            </label>
+          </details>
+
+          <div class="actions">
+            <button type="button" id="preview-btn">Preview changes</button>
+            <button type="submit" id="apply-btn">Apply</button>
+          </div>
+
+          <p class="notice">
+            Token is held in memory only and never persisted by this app.
+          </p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Result</h2>
+        <pre id="result">Ready.</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
