@@ -1,0 +1,14 @@
+{
+  "name": "build-sha-sync-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static BYO-token web app for syncing BUILD_SHA",
+  "scripts": {
+    "dev": "live-server --host=127.0.0.1 --port=4173 --no-browser --watch=index.html,styles.css,app.js,README.md",
+    "start": "live-server --host=127.0.0.1 --port=4173 --no-browser",
+    "serve": "python3 -m http.server 4173"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}
