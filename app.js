@@ -1,14 +1,37 @@
-const APP_ACCESS_HASH = "25badaffdd37d10271b46c44520b5f7b92299fd710662ef9d259b540e964497b";
+const APP_ACCESS_HASH = "bcb7aefd1c4be238b24c37fdcd2c8b17a182a4be0e9f2898da0e7d15095154cf";
 const ACCESS_SESSION_KEY = "build_sha_sync_access_ok";
+const THEME_STORAGE_KEY = "build_sha_sync_theme";
+const TOKEN_SESSION_KEY = "build_sha_sync_token_session";
+const TOKEN_PERSIST_KEY = "build_sha_sync_token_persist";
+const TOKEN_VALUE_KEY = "build_sha_sync_token_value";
+const TOKEN_EXPIRES_AT_KEY = "build_sha_sync_token_expires_at";
+const TOKEN_PERSIST_DAYS = 14;
+const SHA_LENGTH = 7;
+const AUTO_COMMIT_FETCH_DEBOUNCE_MS = 500;
 
 const form = document.getElementById("sync-form");
 const previewBtn = document.getElementById("preview-btn");
 const applyBtn = document.getElementById("apply-btn");
+const loadCommitsBtn = document.getElementById("load-commits-btn");
+const refreshRepoOptionsBtn = document.getElementById("refresh-repo-options-btn");
+const clearResultBtn = document.getElementById("clear-result-btn");
+const selectAllFilesBtn = document.getElementById("select-all-files-btn");
+const selectNoneFilesBtn = document.getElementById("select-none-files-btn");
+const fileSelectionListEl = document.getElementById("file-selection-list");
+const clearTokenBtn = document.getElementById("clear-token-btn");
+const tokenStorageNoteEl = document.getElementById("token-storage-note");
+const fileFilterInputEl = document.getElementById("file-filter-input");
+const selectionSummaryEl = document.getElementById("selection-summary");
 const resultEl = document.getElementById("result");
 const tokenInput = document.getElementById("token");
+const rememberTokenEl = document.getElementById("remember-token");
+const commitMessageTemplateEl = document.getElementById("commit-message-template");
+const yoloModeEl = document.getElementById("yolo-mode");
 
 const sourceRepoEl = document.getElementById("source-repo");
 const sourceBranchEl = document.getElementById("source-branch");
+const sourceCommitEl = document.getElementById("source-commit");
+const sourceCommitInfoEl = document.getElementById("source-commit-info");
 const targetGroupEl = document.getElementById("target-group");
 const envScopeEl = document.getElementById("env-scope");
 const targetBranchEl = document.getElementById("target-branch");
@@ -17,19 +40,217 @@ const sourceOwnerEl = document.getElementById("source-owner");
 const targetOwnerEl = document.getElementById("target-owner");
 const targetRepoEl = document.getElementById("target-repo");
 
+let lastPreview = null;
+let commitFetchDebounceId = null;
+
 init();
 
 async function init() {
   await enforceAccessGate();
+  enforceDarkModeOnly();
+  initializeTokenPersistence();
+  clearSourceCommitSelection();
+  await refreshRepoAndGroupOptions({ silent: true });
+  initializeDropdowns();
+  await reloadSourceBranches();
+  await reloadTargetBranches();
+  await reloadSourceCommits();
 
+  bindEventHandlers();
+
+  updateModeUi();
+  updateSelectionSummary();
+}
+
+function bindEventHandlers() {
+  bindTokenHandlers();
+  bindSourceHandlers();
+  bindTargetHandlers();
+  bindPreviewHandlers();
+  bindFormHandlers();
+  bindFileSelectionHandlers();
+  bindResultHandlers();
+}
+
+function bindTokenHandlers() {
+  clearTokenBtn.addEventListener("click", clearToken);
+}
+
+function bindSourceHandlers() {
+  loadCommitsBtn.addEventListener("click", async () => {
+    await reloadSourceCommits();
+  });
+
+  refreshRepoOptionsBtn.addEventListener("click", async () => {
+    await refreshRepoAndGroupOptions({ silent: false });
+    await reloadSourceBranches();
+    await reloadTargetBranches();
+    await reloadSourceCommits();
+  });
+
+  sourceOwnerEl.addEventListener("input", async () => {
+    clearSourceCommitSelection();
+    await refreshSourceRepoOptions();
+    await refreshSourceBranchOptions();
+    await reloadSourceBranches();
+    await reloadSourceCommits();
+  });
+  sourceRepoEl.addEventListener("change", () => {
+    clearSourceCommitSelection();
+    refreshSourceBranchOptions();
+    reloadSourceBranches();
+    scheduleAutoCommitFetch();
+  });
+  sourceBranchEl.addEventListener("change", () => {
+    clearSourceCommitSelection();
+    scheduleAutoCommitFetch();
+  });
+}
+
+function bindTargetHandlers() {
+  targetOwnerEl.addEventListener("input", async () => {
+    await refreshTargetBranchOptions();
+    await reloadTargetBranches();
+    await refreshTargetGroupOptions();
+  });
+  targetRepoEl.addEventListener("input", async () => {
+    await refreshTargetBranchOptions();
+    await reloadTargetBranches();
+    await refreshTargetGroupOptions();
+  });
+  targetBranchEl.addEventListener("change", async () => {
+    await refreshTargetGroupOptions();
+  });
+  modeEl.addEventListener("change", () => {
+    updateModeUi();
+    updateSelectionSummary();
+  });
+}
+
+function bindPreviewHandlers() {
   previewBtn.addEventListener("click", async () => {
     await runPreview();
   });
+}
 
+function bindFormHandlers() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     await runApply();
   });
+
+  form.addEventListener("keydown", async (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      await runApply();
+    }
+  });
+}
+
+function bindFileSelectionHandlers() {
+  selectAllFilesBtn.addEventListener("click", () => setAllFileSelections(true));
+  selectNoneFilesBtn.addEventListener("click", () => setAllFileSelections(false));
+  fileFilterInputEl.addEventListener("input", applyFileFilter);
+  fileSelectionListEl.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "checkbox") {
+      updateSelectionSummary();
+    }
+  });
+}
+
+function bindResultHandlers() {
+  clearResultBtn.addEventListener("click", () => {
+    writeResult("Ready.");
+  });
+}
+
+function enforceDarkModeOnly() {
+  document.body.dataset.theme = "dark";
+  localStorage.setItem(THEME_STORAGE_KEY, "dark");
+}
+
+function initializeTokenPersistence() {
+  clearExpiredRememberedToken();
+
+  const persisted = localStorage.getItem(TOKEN_PERSIST_KEY) === "yes";
+  const rememberedToken = localStorage.getItem(TOKEN_VALUE_KEY) || "";
+  const sessionToken = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
+  const initialToken = rememberedToken || sessionToken;
+
+  if (initialToken) {
+    tokenInput.value = initialToken;
+  }
+  rememberTokenEl.checked = persisted;
+
+  tokenInput.addEventListener("input", syncTokenStorage);
+  rememberTokenEl.addEventListener("change", syncTokenStorage);
+  updateTokenStorageNote();
+}
+
+function syncTokenStorage() {
+  const token = tokenInput.value.trim();
+  if (!token) {
+    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    localStorage.removeItem(TOKEN_VALUE_KEY);
+    localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
+    if (!rememberTokenEl.checked) {
+      localStorage.removeItem(TOKEN_PERSIST_KEY);
+    }
+    updateTokenStorageNote();
+    return;
+  }
+
+  sessionStorage.setItem(TOKEN_SESSION_KEY, token);
+
+  if (rememberTokenEl.checked) {
+    const expiresAt = Date.now() + TOKEN_PERSIST_DAYS * 24 * 60 * 60 * 1000;
+    localStorage.setItem(TOKEN_PERSIST_KEY, "yes");
+    localStorage.setItem(TOKEN_VALUE_KEY, token);
+    localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(expiresAt));
+    updateTokenStorageNote();
+    return;
+  }
+
+  localStorage.removeItem(TOKEN_VALUE_KEY);
+  localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
+  localStorage.removeItem(TOKEN_PERSIST_KEY);
+  updateTokenStorageNote();
+}
+
+function clearToken() {
+  tokenInput.value = "";
+  sessionStorage.removeItem(TOKEN_SESSION_KEY);
+  localStorage.removeItem(TOKEN_VALUE_KEY);
+  localStorage.removeItem(TOKEN_PERSIST_KEY);
+  localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
+  rememberTokenEl.checked = false;
+  updateTokenStorageNote();
+}
+
+function clearExpiredRememberedToken() {
+  const expiresAtRaw = localStorage.getItem(TOKEN_EXPIRES_AT_KEY);
+  if (!expiresAtRaw) {
+    return;
+  }
+
+  const expiresAt = Number.parseInt(expiresAtRaw, 10);
+  if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+    localStorage.removeItem(TOKEN_VALUE_KEY);
+    localStorage.removeItem(TOKEN_PERSIST_KEY);
+    localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
+  }
+}
+
+function updateTokenStorageNote() {
+  if (rememberTokenEl.checked) {
+    tokenStorageNoteEl.textContent =
+      "Token storage: Remember on this device (local storage, expires in 14 days).";
+    return;
+  }
+
+  tokenStorageNoteEl.textContent =
+    "Token storage: Session only (recommended; cleared when tab closes).";
 }
 
 async function enforceAccessGate() {
@@ -51,6 +272,7 @@ async function enforceAccessGate() {
 function setBusy(isBusy) {
   previewBtn.disabled = isBusy;
   applyBtn.disabled = isBusy;
+  loadCommitsBtn.disabled = isBusy;
 }
 
 function writeResult(lines, isError = false) {
@@ -59,6 +281,32 @@ function writeResult(lines, isError = false) {
 }
 
 function readConfig() {
+  const sourceConfig = readSourceConfig();
+  const targetOwner = targetOwnerEl.value.trim();
+  const targetRepo = targetRepoEl.value.trim();
+  const targetBranch = targetBranchEl.value.trim();
+
+  if (!targetOwner || !targetRepo || !targetBranch) {
+    throw new Error("Owner, branch, and repo fields cannot be empty.");
+  }
+
+  return {
+    ...sourceConfig,
+    sourceCommitSha: sourceCommitEl.value || null,
+    targetOwner,
+    targetRepo,
+    targetGroup: targetGroupEl.value,
+    envScope: envScopeEl.value,
+    targetBranch,
+    mode: modeEl.value,
+    commitMessageTemplate: commitMessageTemplateEl.value,
+    yoloMode: yoloModeEl.checked,
+  };
+}
+
+function readSourceConfig() {
+  syncTokenStorage();
+
   const token = tokenInput.value.trim();
   if (!token) {
     throw new Error("GitHub token is required.");
@@ -66,12 +314,9 @@ function readConfig() {
 
   const sourceOwner = sourceOwnerEl.value.trim();
   const sourceBranch = sourceBranchEl.value.trim();
-  const targetOwner = targetOwnerEl.value.trim();
-  const targetRepo = targetRepoEl.value.trim();
-  const targetBranch = targetBranchEl.value.trim();
 
-  if (!sourceOwner || !sourceBranch || !targetOwner || !targetRepo || !targetBranch) {
-    throw new Error("Owner, branch, and repo fields cannot be empty.");
+  if (!sourceOwner || !sourceBranch) {
+    throw new Error("Source owner and source branch cannot be empty.");
   }
 
   return {
@@ -79,41 +324,636 @@ function readConfig() {
     sourceOwner,
     sourceRepo: sourceRepoEl.value,
     sourceBranch,
-    targetOwner,
-    targetRepo,
-    targetGroup: targetGroupEl.value,
-    envScope: envScopeEl.value,
-    targetBranch,
-    mode: modeEl.value,
   };
+}
+
+function clearSourceCommitSelection() {
+  sourceCommitEl.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Latest on source branch (HEAD)";
+  sourceCommitEl.append(defaultOption);
+  sourceCommitEl.value = "";
+  refreshSelect2(sourceCommitEl);
+  sourceCommitInfoEl.textContent = "Commits auto-refresh when source branch changes.";
+}
+
+function updateModeUi() {
+  const isCherryPick = modeEl.value === "cherry-pick";
+  setSelectDisabled(targetGroupEl, isCherryPick);
+  setSelectDisabled(envScopeEl, isCherryPick);
+  fileFilterInputEl.disabled = isCherryPick;
+  selectAllFilesBtn.disabled = isCherryPick;
+  selectNoneFilesBtn.disabled = isCherryPick;
+  previewBtn.textContent = isCherryPick ? "Preview commit" : "Preview changes";
+
+  if (isCherryPick) {
+    selectionSummaryEl.textContent = "Cherry-pick applies full commit";
+    applyBtn.textContent = "Apply cherry-pick";
+    fileSelectionListEl.textContent =
+      "Not used in cherry-pick mode. Preview shows files touched by selected source commit.";
+  }
+}
+
+function renderFileSelection(preview) {
+  lastPreview = preview;
+  fileSelectionListEl.innerHTML = "";
+  fileFilterInputEl.value = "";
+
+  if (!preview || preview.changedFiles.length === 0) {
+    fileSelectionListEl.textContent = "No editable files from latest preview.";
+    updateSelectionSummary();
+    return;
+  }
+
+  for (const file of preview.changedFiles) {
+    const row = document.createElement("label");
+    row.className = "file-item";
+    row.dataset.path = file.path.toLowerCase();
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.dataset.path = file.path;
+    checkbox.setAttribute("aria-label", `Select ${file.path}`);
+
+    const pathText = document.createElement("span");
+    pathText.className = "file-path";
+    pathText.textContent = file.path;
+
+    row.append(checkbox, pathText);
+    fileSelectionListEl.append(row);
+  }
+
+  updateSelectionSummary();
+}
+
+function setAllFileSelections(checked) {
+  const checkboxes = fileSelectionListEl.querySelectorAll('input[type="checkbox"][data-path]');
+  for (const box of checkboxes) {
+    box.checked = checked;
+  }
+  updateSelectionSummary();
+}
+
+function getSelectedFilePaths() {
+  const checked = fileSelectionListEl.querySelectorAll(
+    'input[type="checkbox"][data-path]:checked'
+  );
+  return Array.from(checked).map((node) => node.dataset.path);
+}
+
+function applyFileFilter() {
+  const keyword = fileFilterInputEl.value.trim().toLowerCase();
+  const rows = fileSelectionListEl.querySelectorAll(".file-item");
+
+  for (const row of rows) {
+    const path = row.dataset.path || "";
+    row.style.display = path.includes(keyword) ? "grid" : "none";
+  }
+}
+
+function updateSelectionSummary() {
+  if (modeEl.value === "cherry-pick") {
+    selectionSummaryEl.textContent = "Cherry-pick applies full commit";
+    applyBtn.textContent = "Apply cherry-pick";
+    return;
+  }
+
+  const all = fileSelectionListEl.querySelectorAll('input[type="checkbox"][data-path]');
+  const selected = fileSelectionListEl.querySelectorAll(
+    'input[type="checkbox"][data-path]:checked'
+  );
+
+  const allCount = all.length;
+  const selectedCount = selected.length;
+  selectionSummaryEl.textContent = `Selected ${selectedCount} of ${allCount}`;
+  applyBtn.textContent = selectedCount > 0 ? `Apply (${selectedCount})` : "Apply";
+}
+
+function getDetectedScopeForChanges(changes) {
+  return detectScopeFromPaths(changes.map((file) => file.path));
+}
+
+function getSelectedChanges(preview) {
+  const selectedPaths = new Set(getSelectedFilePaths());
+  return preview.changedFiles.filter((file) => selectedPaths.has(file.path));
+}
+
+function buildPreviewLines(preview, detectedScope) {
+  const lines = [
+    `Source SHA: ${preview.shortSha}`,
+    `Source ref: ${preview.sourceRefText}`,
+    `Detected scope: ${detectedScope}`,
+    `Scanned: ${preview.scannedCount} env file(s)`,
+    `Will change: ${preview.changedFiles.length} file(s)`,
+    "",
+    ...preview.changedFiles.slice(0, 50).map((file) => `- ${file.path}`),
+  ];
+  if (preview.changedFiles.length > 50) {
+    lines.push(`...and ${preview.changedFiles.length - 50} more`);
+  }
+  return lines;
+}
+
+function scheduleAutoCommitFetch() {
+  if (commitFetchDebounceId) {
+    clearTimeout(commitFetchDebounceId);
+  }
+
+  commitFetchDebounceId = setTimeout(async () => {
+    const hasToken = tokenInput.value.trim().length > 0;
+    const hasBranch = sourceBranchEl.value.trim().length > 0;
+    const hasRepo = sourceRepoEl.value.trim().length > 0;
+    if (!hasToken || !hasBranch || !hasRepo) {
+      return;
+    }
+
+    await reloadSourceCommits();
+  }, AUTO_COMMIT_FETCH_DEBOUNCE_MS);
+}
+
+async function refreshRepoAndGroupOptions({ silent = true } = {}) {
+  const sourceOk = await refreshSourceRepoOptions();
+  const sourceBranchOk = await refreshSourceBranchOptions();
+  const targetBranchOk = await refreshTargetBranchOptions();
+  const targetOk = await refreshTargetGroupOptions();
+
+  if (!silent) {
+    if (sourceOk && sourceBranchOk && targetBranchOk && targetOk) {
+      writeResult(["Refreshed source repos and target groups from API."]);
+      return;
+    }
+
+    writeResult([
+      "Could not fully refresh repo/group options from API.",
+      "Using existing values shown in the form.",
+    ], true);
+  }
+}
+
+async function refreshSourceRepoOptions() {
+  try {
+    const sourceConfig = readSourceConfig();
+    const repos = await fetchOwnerRepos(sourceConfig, sourceConfig.sourceOwner);
+    const names = repos
+      .map((repo) => repo?.name)
+      .filter((name) => typeof name === "string" && name.startsWith("CATAPA-"))
+      .sort((a, b) => a.localeCompare(b));
+
+    if (names.length === 0) {
+      return false;
+    }
+
+    const current = sourceRepoEl.value;
+    replaceSelectOptions(sourceRepoEl, names, names.includes(current) ? current : names[0]);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function refreshSourceBranchOptions() {
+  try {
+    const sourceConfig = readSourceConfig();
+    const branches = await fetchRepoBranchesPage(
+      sourceConfig,
+      sourceConfig.sourceOwner,
+      sourceConfig.sourceRepo,
+      1,
+      1
+    );
+    if (!branches.data.length) {
+      sourceBranchEl.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No branches found";
+      sourceBranchEl.append(option);
+      refreshSelect2(sourceBranchEl);
+      return false;
+    }
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function refreshTargetGroupOptions() {
+  try {
+    const config = readConfig();
+    const rootEntries = await githubRequest({
+      config,
+      method: "GET",
+      path: `/repos/${encodeURIComponent(config.targetOwner)}/${encodeURIComponent(config.targetRepo)}/contents?ref=${encodeURIComponent(config.targetBranch)}`,
+    });
+
+    if (!Array.isArray(rootEntries)) {
+      return;
+    }
+
+    const groups = rootEntries
+      .filter((entry) => entry?.type === "dir")
+      .map((entry) => entry.name)
+      .filter((name) => typeof name === "string" && name.startsWith("CATAPA-"))
+      .sort((a, b) => a.localeCompare(b));
+
+    if (groups.length === 0) {
+      return false;
+    }
+
+    const current = targetGroupEl.value;
+    const options = ["ALL", ...groups];
+    const nextValue = current === "ALL" || groups.includes(current) ? current : groups[0];
+
+    replaceSelectOptions(targetGroupEl, options, nextValue);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function refreshTargetBranchOptions() {
+  try {
+    const config = readConfig();
+    const branches = await fetchRepoBranchesPage(
+      config,
+      config.targetOwner,
+      config.targetRepo,
+      1,
+      1
+    );
+    if (!branches.data.length) {
+      targetBranchEl.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No branches found";
+      targetBranchEl.append(option);
+      refreshSelect2(targetBranchEl);
+      return false;
+    }
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function initializeDropdowns() {
+  if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.select2) {
+    return;
+  }
+
+  const baseConfig = {
+    width: "100%",
+    minimumResultsForSearch: 0,
+  };
+
+  window.jQuery(sourceRepoEl).select2(baseConfig);
+  window.jQuery(targetGroupEl).select2(baseConfig);
+  window.jQuery(envScopeEl).select2(baseConfig);
+  window.jQuery(modeEl).select2(baseConfig);
+
+  window.jQuery(sourceBranchEl).select2(createBranchSelect2Config(() => ({
+    token: tokenInput.value.trim(),
+    owner: sourceOwnerEl.value.trim(),
+    repo: sourceRepoEl.value,
+  })));
+
+  window.jQuery(targetBranchEl).select2(createBranchSelect2Config(() => ({
+    token: tokenInput.value.trim(),
+    owner: targetOwnerEl.value.trim(),
+    repo: targetRepoEl.value.trim(),
+  })));
+
+  window.jQuery(sourceCommitEl).select2(createCommitSelect2Config(() => ({
+    token: tokenInput.value.trim(),
+    owner: sourceOwnerEl.value.trim(),
+    repo: sourceRepoEl.value,
+    branch: sourceBranchEl.value,
+  })));
+}
+
+function createBranchSelect2Config(getContext) {
+  return {
+    width: "100%",
+    minimumInputLength: 0,
+    language: {
+      searching: () => "Loading...",
+      noResults: () => "",
+      errorLoading: () => "Unable to load",
+      loadingMore: () => "Loading more...",
+    },
+    ajax: {
+      delay: 250,
+      transport: (params, success, failure) => {
+        const ctx = getContext();
+        if (!ctx?.token || !ctx.owner || !ctx.repo) {
+          success({
+            results: [{ id: "__empty__", text: "Enter token and repo to load", disabled: true }],
+            pagination: { more: false },
+          });
+          return null;
+        }
+
+        const term = (params?.data?.term || "").trim();
+        const page = Number(params?.data?.page || 1);
+        const url = buildBranchesUrl(ctx.owner, ctx.repo, 50, page);
+        const request = window.jQuery.ajax({
+          url,
+          dataType: "json",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${ctx.token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        });
+        request
+          .done((data, _status, xhr) => {
+            const options = filterBranchOptions(data, term);
+            const linkHeader = xhr.getResponseHeader("Link");
+            const hasNext = hasNextPageLink(linkHeader);
+            const results =
+              options.length === 0 && !hasNext && page === 1
+                ? ensureNonEmptyResults(options, "No data found")
+                : options;
+            success({
+              results,
+              pagination: { more: hasNext },
+            });
+          })
+          .fail((_xhr, _status, error) => {
+            failure(error || "Request failed");
+          });
+        return request;
+      },
+      processResults: (data) => data,
+    },
+  };
+}
+
+function createCommitSelect2Config(getContext) {
+  return {
+    width: "100%",
+    minimumInputLength: 0,
+    language: {
+      searching: () => "Loading...",
+      noResults: () => "",
+      errorLoading: () => "Unable to load",
+      loadingMore: () => "Loading more...",
+    },
+    ajax: {
+      delay: 250,
+      transport: (params, success, failure) => {
+        const ctx = getContext();
+        if (!ctx?.token || !ctx.owner || !ctx.repo || !ctx.branch) {
+          success({
+            results: [{ id: "__empty__", text: "Enter token and branch to load", disabled: true }],
+            pagination: { more: false },
+          });
+          return null;
+        }
+
+        const term = (params?.data?.term || "").trim();
+        const page = Number(params?.data?.page || 1);
+        const url = buildCommitsUrl(ctx.owner, ctx.repo, ctx.branch, 30, page);
+        const request = window.jQuery.ajax({
+          url,
+          dataType: "json",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${ctx.token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        });
+        request
+          .done((data, _status, xhr) => {
+            const options = filterCommitOptions(data, term);
+            const linkHeader = xhr.getResponseHeader("Link");
+            const hasNext = hasNextPageLink(linkHeader);
+            const results =
+              options.length === 0 && !hasNext && page === 1
+                ? ensureNonEmptyResults(options, "No data found")
+                : options;
+            sourceCommitInfoEl.textContent = buildCommitInfoText(
+              ctx,
+              options.length,
+              term,
+              hasNext
+            );
+            success({
+              results,
+              pagination: { more: hasNext },
+            });
+          })
+          .fail((_xhr, _status, error) => {
+            failure(error || "Request failed");
+          });
+        return request;
+      },
+      processResults: (data) => data,
+    },
+  };
+}
+
+function replaceSelectOptions(selectEl, values, selectedValue) {
+  selectEl.innerHTML = "";
+  const nextValue = values.includes(selectedValue) ? selectedValue : values[0];
+  for (const value of values) {
+    const option = new Option(value, value, value === nextValue, value === nextValue);
+    selectEl.add(option);
+  }
+  if (window.jQuery?.fn?.select2) {
+    window.jQuery(selectEl).trigger("change.select2");
+  }
+}
+
+function buildBranchesUrl(owner, repo, perPage, page) {
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}&page=${page}`;
+}
+
+function buildCommitsUrl(owner, repo, branch, perPage, page) {
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?sha=${encodeURIComponent(branch)}&per_page=${perPage}&page=${page}`;
+}
+
+function setSelectDisabled(selectEl, disabled) {
+  selectEl.disabled = disabled;
+  if (window.jQuery?.fn?.select2) {
+    window.jQuery(selectEl).prop("disabled", disabled).trigger("change.select2");
+  }
+}
+
+function refreshSelect2(selectEl) {
+  if (window.jQuery?.fn?.select2) {
+    window.jQuery(selectEl).trigger("change.select2");
+  }
+}
+
+function clearSelect2Selection(selectEl) {
+  selectEl.value = "";
+  if (window.jQuery?.fn?.select2) {
+    window.jQuery(selectEl).val(null).trigger("change.select2");
+  }
+}
+
+async function reloadSourceBranches() {
+  clearSelect2Selection(sourceBranchEl);
+}
+
+async function reloadTargetBranches() {
+  refreshSelect2(targetBranchEl);
+}
+
+async function reloadSourceCommits() {
+  clearSourceCommitSelection();
+  refreshSelect2(sourceCommitEl);
+}
+
+
+function filterBranchOptions(branches, query) {
+  const normalized = query.trim().toLowerCase();
+  return (Array.isArray(branches) ? branches : [])
+    .map((branch) => ({ id: branch?.name || "", text: branch?.name || "" }))
+    .filter((option) => option.id)
+    .filter((option) => !normalized || option.text.toLowerCase().includes(normalized));
+}
+
+function filterCommitOptions(commits, query) {
+  const normalized = query.trim().toLowerCase();
+  return (Array.isArray(commits) ? commits : [])
+    .map((commit) => {
+      const sha = commit?.sha || "";
+      const shortSha = sha.slice(0, SHA_LENGTH);
+      const title = (commit?.commit?.message || "").split("\n")[0] || "No message";
+      const date = (commit?.commit?.author?.date || "").slice(0, 10);
+      const text = `${shortSha} - ${title}${date ? ` (${date})` : ""}`;
+      return {
+        id: sha,
+        text,
+      };
+    })
+    .filter((option) => option.id)
+    .filter(
+      (option) =>
+        !normalized ||
+        option.text.toLowerCase().includes(normalized) ||
+        option.id.toLowerCase().includes(normalized)
+    );
+}
+
+function ensureNonEmptyResults(results, message) {
+  if (results.length > 0) {
+    return results;
+  }
+  return [{ id: "__empty__", text: message, disabled: true }];
+}
+
+function buildCommitInfoText(ctx, count, query, hasNext) {
+  const suffix = hasNext ? " (more available)" : "";
+  if (query) {
+    return `Found ${count} matching commit(s) in ${ctx.repo}/${ctx.branch}.${suffix}`;
+  }
+  return `Loaded ${count} commit(s) from ${ctx.repo}/${ctx.branch}.${suffix}`;
+}
+
+async function fetchRepoBranchesPage(config, owner, repo, page, perPage) {
+  const response = await githubRequestWithHeaders({
+    config,
+    method: "GET",
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}&page=${page}`,
+  });
+  return {
+    data: Array.isArray(response.data) ? response.data : [],
+    headers: response.headers,
+  };
+}
+
+
+async function fetchOwnerRepos(config, owner) {
+  try {
+    return await githubRequest({
+      config,
+      method: "GET",
+      path: `/orgs/${encodeURIComponent(owner)}/repos?per_page=100&type=all`,
+    });
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (!message.includes("(404)")) {
+      throw error;
+    }
+
+    return githubRequest({
+      config,
+      method: "GET",
+      path: `/users/${encodeURIComponent(owner)}/repos?per_page=100&type=all`,
+    });
+  }
+}
+
+
+
+
+function parseLinkHeader(value) {
+  return value.split(",").reduce((acc, part) => {
+    const section = part.split(";");
+    if (section.length < 2) {
+      return acc;
+    }
+    const url = section[0].trim().replace(/^<|>$/g, "");
+    const name = section[1].trim().replace(/rel="(.*)"/, "$1");
+    if (name) {
+      acc[name] = url;
+    }
+    return acc;
+  }, {});
+}
+
+function hasNextPageLink(linkHeader) {
+  if (!linkHeader) {
+    return false;
+  }
+  return Boolean(parseLinkHeader(linkHeader).next);
 }
 
 async function runPreview() {
   setBusy(true);
   try {
     const config = readConfig();
+
+    if (config.mode === "cherry-pick") {
+      writeResult(["Loading selected source commit for cherry-pick preview..."]);
+      const plan = await buildCherryPickPlan(config);
+      renderCherryPickPreview(plan);
+
+      const lines = [
+        `Source SHA: ${plan.shortSha}`,
+        `Source ref: ${plan.sourceRefText}`,
+        `Target: ${config.targetOwner}/${config.targetRepo}@${config.targetBranch}`,
+        `Will replay: ${plan.changedPaths.length} file change(s)`,
+        "",
+        ...plan.changedPaths.slice(0, 50).map((path) => `- ${path}`),
+      ];
+      if (plan.changedPaths.length > 50) {
+        lines.push(`...and ${plan.changedPaths.length - 50} more`);
+      }
+      writeResult(lines);
+      return;
+    }
+
     writeResult(["Fetching source SHA and scanning target files..."]);
     const preview = await computeChanges(config);
+    renderFileSelection(preview);
+    const detectedScope = getDetectedScopeForChanges(preview.changedFiles);
 
     if (preview.changedFiles.length === 0) {
       writeResult([
         `Source SHA: ${preview.shortSha}`,
+        `Source ref: ${preview.sourceRefText}`,
+        `Detected scope: ${detectedScope}`,
         `No BUILD_SHA changes needed for ${preview.scannedCount} env file(s).`,
       ]);
       return;
     }
 
-    const lines = [
-      `Source SHA: ${preview.shortSha}`,
-      `Scanned: ${preview.scannedCount} env file(s)`,
-      `Will change: ${preview.changedFiles.length} file(s)`,
-      "",
-      ...preview.changedFiles.slice(0, 50).map((file) => `- ${file.path}`),
-    ];
-    if (preview.changedFiles.length > 50) {
-      lines.push(`...and ${preview.changedFiles.length - 50} more`);
-    }
-    writeResult(lines);
+    writeResult(buildPreviewLines(preview, detectedScope));
   } catch (error) {
     writeResult(error.message, true);
   } finally {
@@ -125,12 +965,39 @@ async function runApply() {
   setBusy(true);
   try {
     const config = readConfig();
+
+    if (config.mode === "cherry-pick") {
+      await runCherryPickApply(config);
+      return;
+    }
+
     writeResult(["Computing and applying changes atomically..."]);
 
     const preview = await computeChanges(config);
+    if (!lastPreview) {
+      renderFileSelection(preview);
+    }
+
+    const selectedChanges = getSelectedChanges(preview);
+    const detectedScope = getDetectedScopeForChanges(selectedChanges);
+
+    if (preview.changedFiles.length > 0 && selectedChanges.length === 0) {
+      throw new Error("No files selected. Choose at least one file in 'Files to update'.");
+    }
+
+    if (!config.yoloMode && config.envScope === "auto" && detectedScope === "mixed") {
+      const accepted = window.confirm(
+        "Selected files span multiple scopes (mixed). Continue applying update?"
+      );
+      if (!accepted) {
+        throw new Error("Apply canceled because detected scope is mixed.");
+      }
+    }
+
     if (preview.changedFiles.length === 0) {
       writeResult([
         `Source SHA: ${preview.shortSha}`,
+        `Source ref: ${preview.sourceRefText}`,
         "No changes needed. Skipping commit.",
       ]);
       return;
@@ -154,10 +1021,10 @@ async function runApply() {
     const treeSha = await createTreeFromChanges({
       config,
       baseTreeSha,
-      changedFiles: preview.changedFiles,
+      changedFiles: selectedChanges,
     });
 
-    const commitMessage = `chore: sync BUILD_SHA=${preview.shortSha} from ${config.sourceRepo}@${config.sourceBranch}`;
+    const commitMessage = buildCommitMessage(config, preview, detectedScope);
     const newCommitSha = await createCommit({
       config,
       message: commitMessage,
@@ -173,7 +1040,10 @@ async function runApply() {
 
     const lines = [
       `Source SHA: ${preview.shortSha}`,
-      `Updated: ${preview.changedFiles.length} file(s)`,
+      `Source ref: ${preview.sourceRefText}`,
+      `Detected scope: ${detectedScope}`,
+      `Updated: ${selectedChanges.length} file(s)`,
+      `Commit message: ${commitMessage.split("\n")[0]}`,
     ];
 
     if (config.mode === "pr") {
@@ -182,6 +1052,9 @@ async function runApply() {
         headBranch: workingBranch,
         baseBranch: config.targetBranch,
         shortSha: preview.shortSha,
+        sourceRefText: preview.sourceRefText,
+        commitMessage,
+        detectedScope,
       });
       lines.push(`PR: ${pr.html_url}`);
     } else {
@@ -199,16 +1072,13 @@ async function runApply() {
 }
 
 async function computeChanges(config) {
-  const sourceBranchData = await githubRequest({
-    config,
-    method: "GET",
-    path: `/repos/${encodeURIComponent(config.sourceOwner)}/${encodeURIComponent(config.sourceRepo)}/branches/${encodeURIComponent(config.sourceBranch)}`,
-  });
-  const sourceSha = sourceBranchData?.commit?.sha;
+  const sourceSha = await resolveSourceCommitSha(config);
+
   if (!sourceSha) {
     throw new Error("Unable to read source commit SHA.");
   }
-  const shortSha = sourceSha.slice(0, 6);
+  const shortSha = sourceSha.slice(0, SHA_LENGTH);
+  const sourceRefText = `${config.sourceOwner}/${config.sourceRepo}@${config.sourceBranch} (${sourceSha.slice(0, SHA_LENGTH)})`;
 
   const targetBranchData = await githubRequest({
     config,
@@ -253,12 +1123,17 @@ async function computeChanges(config) {
 
   return {
     shortSha,
+    sourceRefText,
     scannedCount: envPaths.length,
     changedFiles,
   };
 }
 
 async function assertDirectCommitConfirmed(config) {
+  if (config.yoloMode) {
+    return;
+  }
+
   const protectedBranch = /^(main|master)$/i.test(config.targetBranch);
   if (!protectedBranch) {
     return;
@@ -325,6 +1200,14 @@ async function createTreeFromChanges({ config, baseTreeSha, changedFiles }) {
     });
   }
 
+  return createTreeFromEntries({
+    config,
+    baseTreeSha,
+    tree,
+  });
+}
+
+async function createTreeFromEntries({ config, baseTreeSha, tree }) {
   const newTree = await githubRequest({
     config,
     method: "POST",
@@ -336,6 +1219,191 @@ async function createTreeFromChanges({ config, baseTreeSha, changedFiles }) {
   });
 
   return newTree.sha;
+}
+
+function renderCherryPickPreview(plan) {
+  lastPreview = null;
+  fileFilterInputEl.value = "";
+  fileSelectionListEl.innerHTML = "";
+
+  if (plan.changedPaths.length === 0) {
+    fileSelectionListEl.textContent = "Selected source commit has no file changes to replay.";
+    selectionSummaryEl.textContent = "Cherry-pick applies full commit";
+    return;
+  }
+
+  for (const path of plan.changedPaths) {
+    const row = document.createElement("div");
+    row.className = "file-item";
+
+    const pathText = document.createElement("p");
+    pathText.className = "file-path";
+    pathText.textContent = path;
+
+    row.append(pathText);
+    fileSelectionListEl.append(row);
+  }
+
+  selectionSummaryEl.textContent = `Cherry-pick replays ${plan.changedPaths.length} path(s)`;
+}
+
+async function runCherryPickApply(config) {
+  assertCherryPickSameRepo(config);
+  writeResult(["Applying cherry-pick to target branch..."]);
+
+  const plan = await buildCherryPickPlan(config);
+  if (plan.treeEntries.length === 0) {
+    writeResult([
+      `Source SHA: ${plan.shortSha}`,
+      "Selected source commit has no file changes. Nothing to apply.",
+    ]);
+    return;
+  }
+
+  await assertDirectCommitConfirmed(config);
+
+  const baseRef = await getRef(config, config.targetBranch);
+  const baseCommitSha = baseRef.object.sha;
+  const baseCommit = await getCommit(config, baseCommitSha);
+  const baseTreeSha = baseCommit.tree.sha;
+  const treeSha = await createTreeFromEntries({
+    config,
+    baseTreeSha,
+    tree: plan.treeEntries,
+  });
+
+  const commitMessage = buildCherryPickCommitMessage(config, plan);
+  const newCommitSha = await createCommit({
+    config,
+    message: commitMessage,
+    treeSha,
+    parentSha: baseCommitSha,
+  });
+
+  await updateRef({
+    config,
+    branch: config.targetBranch,
+    commitSha: newCommitSha,
+  });
+
+  writeResult([
+    `Source SHA: ${plan.shortSha}`,
+    `Source ref: ${plan.sourceRefText}`,
+    `Replayed changes: ${plan.changedPaths.length} path(s)`,
+    `Commit message: ${commitMessage.split("\n")[0]}`,
+    `Commit: https://github.com/${config.targetOwner}/${config.targetRepo}/commit/${newCommitSha}`,
+  ]);
+}
+
+function assertCherryPickSameRepo(config) {
+  const sameOwner = config.sourceOwner === config.targetOwner;
+  const sameRepo = config.sourceRepo === config.targetRepo;
+  if (!sameOwner || !sameRepo) {
+    throw new Error(
+      "Cherry-pick mode requires source and target to be the same repository. Set Source owner/repo equal to Target owner/repo."
+    );
+  }
+}
+
+async function resolveSourceCommitSha(config) {
+  if (config.sourceCommitSha) {
+    return config.sourceCommitSha;
+  }
+
+  const sourceBranchData = await githubRequest({
+    config,
+    method: "GET",
+    path: `/repos/${encodeURIComponent(config.sourceOwner)}/${encodeURIComponent(config.sourceRepo)}/branches/${encodeURIComponent(config.sourceBranch)}`,
+  });
+  return sourceBranchData?.commit?.sha || null;
+}
+
+async function buildCherryPickPlan(config) {
+  assertCherryPickSameRepo(config);
+  const sourceSha = await resolveSourceCommitSha(config);
+  if (!sourceSha) {
+    throw new Error("Unable to read source commit SHA for cherry-pick.");
+  }
+
+  const commitData = await githubRequest({
+    config,
+    method: "GET",
+    path: `/repos/${encodeURIComponent(config.sourceOwner)}/${encodeURIComponent(config.sourceRepo)}/commits/${encodeURIComponent(sourceSha)}`,
+  });
+
+  if (Array.isArray(commitData.parents) && commitData.parents.length > 1) {
+    throw new Error("Cherry-pick mode does not support merge commits. Pick a non-merge commit.");
+  }
+
+  const files = Array.isArray(commitData.files) ? commitData.files : [];
+  const treeEntries = [];
+  const changedPaths = [];
+
+  for (const file of files) {
+    const status = file?.status;
+    const filename = file?.filename;
+    if (!filename || typeof filename !== "string") {
+      continue;
+    }
+
+    if (status === "removed") {
+      treeEntries.push({
+        path: filename,
+        mode: "100644",
+        type: "blob",
+        sha: null,
+      });
+      changedPaths.push(filename);
+      continue;
+    }
+
+    if (status === "added" || status === "modified" || status === "renamed") {
+      if (!file.sha || typeof file.sha !== "string") {
+        throw new Error(`Cherry-pick cannot read blob SHA for ${filename}.`);
+      }
+
+      treeEntries.push({
+        path: filename,
+        mode: "100644",
+        type: "blob",
+        sha: file.sha,
+      });
+      changedPaths.push(filename);
+
+      if (status === "renamed" && file.previous_filename) {
+        treeEntries.push({
+          path: file.previous_filename,
+          mode: "100644",
+          type: "blob",
+          sha: null,
+        });
+        changedPaths.push(file.previous_filename);
+      }
+      continue;
+    }
+
+    throw new Error(
+      `Cherry-pick cannot process file status "${status || "unknown"}" on ${filename}.`
+    );
+  }
+
+  const uniquePaths = [...new Set(changedPaths)];
+  const sourceRefText = `${config.sourceOwner}/${config.sourceRepo}@${config.sourceBranch} (${sourceSha.slice(0, SHA_LENGTH)})`;
+
+  return {
+    sourceSha,
+    shortSha: sourceSha.slice(0, SHA_LENGTH),
+    sourceRefText,
+    changedPaths: uniquePaths,
+    treeEntries,
+    sourceTitle: (commitData.commit?.message || "").split("\n")[0] || "",
+  };
+}
+
+function buildCherryPickCommitMessage(config, plan) {
+  const firstLine = `chore: cherry-pick ${plan.shortSha} from ${config.sourceBranch} to ${config.targetBranch}`;
+  const originalTitle = plan.sourceTitle ? `\n\nOriginal: ${plan.sourceTitle}` : "";
+  return `${firstLine}\n\nSource: ${plan.sourceRefText}${originalTitle}`;
 }
 
 async function createCommit({ config, message, treeSha, parentSha }) {
@@ -364,13 +1432,21 @@ async function updateRef({ config, branch, commitSha }) {
   });
 }
 
-async function createPullRequest({ config, headBranch, baseBranch, shortSha }) {
-  const title = `chore: sync BUILD_SHA to ${shortSha} from ${config.sourceRepo}@${config.sourceBranch}`;
+async function createPullRequest({
+  config,
+  headBranch,
+  baseBranch,
+  shortSha,
+  sourceRefText,
+  commitMessage,
+  detectedScope,
+}) {
+  const title = commitMessage.split("\n")[0] || `chore: sync BUILD_SHA to ${shortSha}`;
   const body = [
     "## Summary",
     `- Sync BUILD_SHA to \`${shortSha}\``,
-    `- Source: ${config.sourceOwner}/${config.sourceRepo}@${config.sourceBranch}`,
-    `- Scope: ${config.targetGroup} (${config.envScope})`,
+    `- Source: ${sourceRefText}`,
+    `- Scope: ${config.targetGroup} (${detectedScope})`,
   ].join("\n");
 
   return githubRequest({
@@ -386,6 +1462,28 @@ async function createPullRequest({ config, headBranch, baseBranch, shortSha }) {
   });
 }
 
+function buildCommitMessage(config, preview, detectedScope) {
+  const template =
+    (config.commitMessageTemplate || "").trim() ||
+    "ci(scope): {commit_sha_7_digit} to dev";
+
+  const map = {
+    commit_sha_7_digit: preview.shortSha,
+    shortSha: preview.shortSha,
+    sourceRef: preview.sourceRefText,
+    sourceOwner: config.sourceOwner,
+    sourceRepo: config.sourceRepo,
+    sourceBranch: config.sourceBranch,
+    targetGroup: config.targetGroup,
+    envScope: detectedScope,
+    scope: detectedScope,
+    targetRepo: config.targetRepo,
+    targetBranch: config.targetBranch,
+  };
+
+  return template.replace(/\{(commit_sha_7_digit|shortSha|sourceRef|sourceOwner|sourceRepo|sourceBranch|targetGroup|envScope|scope|targetRepo|targetBranch)\}/g, (_match, key) => map[key] || "");
+}
+
 function isEnvPath(path) {
   const file = path.split("/").pop() || "";
   return file === ".env" || file.endsWith(".env") || file.includes(".env.");
@@ -399,14 +1497,40 @@ function isInTargetGroup(path, targetGroup) {
 }
 
 function isInEnvScope(path, envScope) {
-  if (envScope === "all") {
+  if (envScope === "all" || envScope === "auto") {
     return true;
   }
   return path.includes(`/${envScope}/`);
 }
 
+function detectScopeFromPaths(paths) {
+  const scopes = new Set();
+  for (const path of paths) {
+    if (path.includes("/dev/")) {
+      scopes.add("dev");
+    }
+    if (path.includes("/demo/")) {
+      scopes.add("demo");
+    }
+    if (path.includes("/prod/")) {
+      scopes.add("prod");
+    }
+  }
+
+  if (scopes.size === 0) {
+    return "all";
+  }
+  if (scopes.size === 1) {
+    return [...scopes][0];
+  }
+  return "mixed";
+}
+
 function applyBuildSha(text, shortSha) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
   let replaced = false;
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -473,6 +1597,33 @@ async function githubRequest({ config, method, path, body }) {
   }
 
   return response.status === 204 ? {} : response.json();
+}
+
+async function githubRequestWithHeaders({ config, method, path, body }) {
+  const response = await fetch(`https://api.github.com${path}`, {
+    method,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${config.token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const parsed = await response.json();
+      detail = parsed.message ? `: ${parsed.message}` : "";
+    } catch (_error) {
+      detail = "";
+    }
+    throw new Error(`GitHub API ${method} ${path} failed (${response.status})${detail}`);
+  }
+
+  const data = response.status === 204 ? {} : await response.json();
+  return { data, headers: response.headers };
 }
 
 async function sha256Hex(value) {

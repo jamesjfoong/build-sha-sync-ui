@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,94 +8,214 @@
       content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     />
     <title>BUILD_SHA Sync</title>
+    <link rel="stylesheet" href="./vendor/pico/pico.min.css" />
+    <link rel="stylesheet" href="./vendor/select2/select2.min.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-key" viewBox="0 0 24 24">
+        <path
+          d="M7.5 14a4.5 4.5 0 1 1 3.5-7.2L21 4v4h-3v3h-3v3H11.8A4.5 4.5 0 0 1 7.5 14Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </symbol>
+      <symbol id="icon-branch" viewBox="0 0 24 24">
+        <path
+          d="M6 6v12M6 6a2 2 0 1 0 0 4M6 18a2 2 0 1 0 0-4M18 6a2 2 0 1 0 0 4M8 8h8a2 2 0 0 1 2 2v2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </symbol>
+      <symbol id="icon-target" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6" />
+        <circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="1.6" />
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      </symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24">
+        <path d="M7 5v14l11-7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24">
+        <path
+          d="M20 12a8 8 0 0 1-13.66 5.66M4 12a8 8 0 0 1 13.66-5.66"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        />
+        <path d="M4 4v6h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        <path d="M20 20v-6h-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      </symbol>
+    </svg>
     <main class="app">
       <header class="hero">
-        <p class="eyebrow">CATAPA Build Utility</p>
-        <h1>Sync BUILD_SHA</h1>
-        <p class="subtitle">
-          BYO token web tool to preview and update BUILD_SHA across multiple
-          .env files in CATAPA-APPS-STATE.
-        </p>
+        <div class="hero-top">
+          <div>
+            <p class="eyebrow">CATAPA Build Utility</p>
+            <h1>Sync BUILD_SHA</h1>
+            <p class="subtitle">
+              BYO token web tool to preview and update BUILD_SHA across multiple
+              .env files in CATAPA-APPS-STATE.
+            </p>
+          </div>
+        </div>
       </header>
 
       <section class="card">
         <form id="sync-form">
-          <label>
-            GitHub token
-            <input
-              id="token"
-              name="token"
-              type="password"
-              placeholder="ghp_... or github_pat_..."
-              autocomplete="off"
-              required
-            />
-          </label>
+          <details id="access-details" class="form-section access-section" open>
+            <summary class="section-summary">
+              <div>
+                <p class="section-kicker">Access</p>
+                <div class="section-title">
+                  <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-key" /></svg>
+                  <h3>Connect GitHub token</h3>
+                </div>
+                <p class="section-note">Token stays in this browser only unless you enable remember.</p>
+              </div>
+              <span id="access-summary-chip" class="summary-chip" aria-hidden="true"></span>
+            </summary>
 
-          <div class="grid-2">
-            <label>
-              Source repo
-              <select id="source-repo" name="sourceRepo">
-                <option value="CATAPA-EXTENSION">CATAPA-EXTENSION</option>
-                <option value="CATAPA-WEB">CATAPA-WEB</option>
-              </select>
-            </label>
+            <div class="section-body">
+              <label>
+                GitHub token
+                <input
+                  id="token"
+                  name="token"
+                  type="password"
+                  placeholder="ghp_... or github_pat_..."
+                  autocomplete="off"
+                  required
+                />
+              </label>
 
-            <label>
-              Source branch
-              <input
-                id="source-branch"
-                name="sourceBranch"
-                type="text"
-                value="develop"
-                required
-              />
-            </label>
+              <div class="actions-inline">
+                <button type="button" id="clear-token-btn" class="secondary">Clear token</button>
+                <a
+                  class="text-link"
+                  href="https://github.com/settings/personal-access-tokens/new?name=CATAPA+BUILD_SHA+Sync&description=Sync+BUILD_SHA+and+optionally+create+PRs&target_name=GDP-ADMIN&expires_in=30&contents=write&pull_requests=write"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open token setup
+                </a>
+              </div>
+
+              <label class="checkbox-row">
+                <input id="remember-token" type="checkbox" />
+                Remember token on this device (less secure)
+              </label>
+              <p id="token-storage-note" class="notice">
+                Token storage: Session only (recommended).
+              </p>
+            </div>
+          </details>
+
+          <div class="form-section">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Source</p>
+                <div class="section-title">
+                  <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-branch" /></svg>
+                  <h3>Choose the commit to copy</h3>
+                </div>
+                <p class="section-note">Pick the repo + branch, then select a commit (or keep HEAD).</p>
+              </div>
+              <button type="button" id="refresh-repo-options-btn" class="secondary">
+                <svg class="icon icon-tight" aria-hidden="true" focusable="false"><use href="#icon-refresh" /></svg>
+                Refresh repo/group
+              </button>
+            </div>
+
+            <div class="grid-2">
+              <label>
+                Source repo
+                <select id="source-repo" name="sourceRepo">
+                  <option value="CATAPA-EXTENSION">CATAPA-EXTENSION</option>
+                </select>
+              </label>
+
+              <label>
+                Source branch
+                <select id="source-branch" name="sourceBranch" required>
+                  <option value="develop">develop</option>
+                </select>
+              </label>
+            </div>
+
+
+            <div class="commit-picker">
+              <div class="commit-picker-head">
+                <h4>Source commit</h4>
+                <button type="button" id="load-commits-btn" class="secondary">Reload</button>
+              </div>
+              <label>
+                Commit
+                <select id="source-commit" name="sourceCommit">
+                  <option value="">Latest on source branch (HEAD)</option>
+                </select>
+              </label>
+              <p id="source-commit-info" class="notice">Commits auto-refresh when source branch changes.</p>
+            </div>
           </div>
 
-          <div class="grid-2">
-            <label>
-              Target group
-              <select id="target-group" name="targetGroup">
-                <option value="CATAPA-EXTENSION">CATAPA-EXTENSION</option>
-                <option value="CATAPA-WEB">CATAPA-WEB</option>
-                <option value="ALL">ALL</option>
-              </select>
-            </label>
+          <div class="form-section">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Target</p>
+                <div class="section-title">
+                  <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-target" /></svg>
+                  <h3>Choose where it lands</h3>
+                </div>
+                <p class="section-note">Scope decides which env files are scanned or updated.</p>
+              </div>
+            </div>
 
-            <label>
-              Environment scope
-              <select id="env-scope" name="envScope">
-                <option value="all">all</option>
-                <option value="dev">dev</option>
-                <option value="demo">demo</option>
-                <option value="prod">prod</option>
-              </select>
-            </label>
-          </div>
+            <div class="grid-2">
+              <label>
+                Target group
+                <select id="target-group" name="targetGroup">
+                  <option value="ALL">ALL</option>
+                </select>
+              </label>
 
-          <div class="grid-2">
-            <label>
-              Target branch
-              <input
-                id="target-branch"
-                name="targetBranch"
-                type="text"
-                value="main"
-                required
-              />
-            </label>
+              <label>
+                Environment scope
+                <select id="env-scope" name="envScope">
+                  <option value="auto">auto</option>
+                  <option value="all">all</option>
+                  <option value="dev">dev</option>
+                  <option value="demo">demo</option>
+                  <option value="prod">prod</option>
+                </select>
+              </label>
+            </div>
 
-            <label>
-              Mode
-              <select id="mode" name="mode">
-                <option value="pr">Create PR (recommended)</option>
-                <option value="commit">Direct commit</option>
-              </select>
-            </label>
+            <div class="grid-2">
+              <label>
+                Target branch
+                <select id="target-branch" name="targetBranch" required>
+                  <option value="main">main</option>
+                </select>
+              </label>
+
+              <label>
+                Mode
+                <select id="mode" name="mode">
+                  <option value="pr">Create PR (recommended)</option>
+                  <option value="commit">Direct commit</option>
+                  <option value="cherry-pick">Cherry-pick commit</option>
+                </select>
+              </label>
+            </div>
+
           </div>
 
           <details class="advanced">
@@ -110,29 +230,77 @@
                 <input id="target-owner" type="text" value="GDP-ADMIN" required />
               </label>
             </div>
-            <label>
-              Target repo
-              <input id="target-repo" type="text" value="CATAPA-APPS-STATE" required />
-            </label>
+              <label>
+                Target repo
+                <input id="target-repo" type="text" value="CATAPA-APPS-STATE" required />
+              </label>
+
+              <label>
+                Commit message format
+                <textarea id="commit-message-template" rows="4">ci(scope): {commit_sha_7_digit} to dev</textarea>
+              </label>
+              <label class="checkbox-row">
+                <input id="yolo-mode" type="checkbox" />
+                YOLO mode (skip safety confirmations)
+              </label>
+            <p class="notice">
+              Placeholders: {commit_sha_7_digit}, {shortSha}, {sourceRef}, {sourceOwner}, {sourceRepo}, {sourceBranch}, {targetGroup}, {envScope}, {scope}, {targetRepo}, {targetBranch}
+            </p>
           </details>
 
-          <div class="actions">
-            <button type="button" id="preview-btn">Preview changes</button>
-            <button type="submit" id="apply-btn">Apply</button>
+          <div class="form-section run-section">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Run</p>
+                <div class="section-title">
+                  <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-play" /></svg>
+                  <h3>Preview first, then apply</h3>
+                </div>
+                <p class="section-note">Preview shows what will change before any commit happens.</p>
+              </div>
+            </div>
+            <div class="actions">
+              <button type="button" id="preview-btn" class="secondary">Preview changes</button>
+              <button type="submit" id="apply-btn">Apply</button>
+            </div>
           </div>
-
-          <p class="notice">
-            Token is held in memory only and never persisted by this app.
-          </p>
         </form>
       </section>
 
       <section class="card">
-        <h2>Result</h2>
+        <div class="result-head">
+          <h2>Result</h2>
+          <button type="button" id="clear-result-btn" class="secondary">Clear</button>
+        </div>
         <pre id="result">Ready.</pre>
+      </section>
+
+      <section class="card">
+        <div class="result-head">
+          <h2>Files to update</h2>
+          <div class="actions-inline">
+            <button type="button" id="select-all-files-btn" class="secondary">Select all</button>
+            <button type="button" id="select-none-files-btn" class="secondary">Select none</button>
+          </div>
+        </div>
+        <p class="notice">
+          Run Preview first, then choose exactly which files to update on Apply.
+        </p>
+        <div class="grid-2">
+          <label>
+            Filter files
+            <input id="file-filter-input" type="text" placeholder="type to filter path..." />
+          </label>
+          <p id="selection-summary" class="selection-summary">Selected 0 of 0</p>
+        </div>
+        <div id="file-selection-list" class="file-selection-list">
+          No preview data yet.
+        </div>
       </section>
     </main>
 
+    <script src="./vendor/jquery/jquery.min.js"></script>
+    <script src="./vendor/select2/select2.min.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
