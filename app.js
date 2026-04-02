@@ -15,18 +15,40 @@ const applyBtn = document.getElementById("apply-btn");
 const loadCommitsBtn = document.getElementById("load-commits-btn");
 const refreshRepoOptionsBtn = document.getElementById("refresh-repo-options-btn");
 const clearResultBtn = document.getElementById("clear-result-btn");
+const copyResultBtn = document.getElementById("copy-result-btn");
 const selectAllFilesBtn = document.getElementById("select-all-files-btn");
 const selectNoneFilesBtn = document.getElementById("select-none-files-btn");
 const fileSelectionListEl = document.getElementById("file-selection-list");
+const filesCardEl = document.getElementById("files-card");
 const clearTokenBtn = document.getElementById("clear-token-btn");
 const tokenStorageNoteEl = document.getElementById("token-storage-note");
+const tokenFormatErrorEl = document.getElementById("token-format-error");
 const fileFilterInputEl = document.getElementById("file-filter-input");
 const selectionSummaryEl = document.getElementById("selection-summary");
 const resultEl = document.getElementById("result");
+const progressHintEl = document.getElementById("progress-hint");
 const tokenInput = document.getElementById("token");
 const rememberTokenEl = document.getElementById("remember-token");
 const commitMessageTemplateEl = document.getElementById("commit-message-template");
 const yoloModeEl = document.getElementById("yolo-mode");
+const accessDetailsEl = document.getElementById("access-details");
+const accessSummaryChipEl = document.getElementById("access-summary-chip");
+const modeHintEl = document.getElementById("mode-hint");
+const previewNoteEl = document.getElementById("preview-note");
+const appRootEl = document.getElementById("app-root");
+const accessOverlayEl = document.getElementById("access-overlay");
+const accessPassphraseInputEl = document.getElementById("access-passphrase");
+const accessSubmitBtn = document.getElementById("access-submit-btn");
+const accessErrorEl = document.getElementById("access-error");
+const togglePassphraseBtn = document.getElementById("toggle-passphrase-btn");
+const confirmOverlayEl = document.getElementById("confirm-overlay");
+const confirmTitleEl = document.getElementById("confirm-title");
+const confirmBodyEl = document.getElementById("confirm-body");
+const confirmInputRowEl = document.getElementById("confirm-input-row");
+const confirmInputEl = document.getElementById("confirm-input");
+const confirmErrorEl = document.getElementById("confirm-error");
+const confirmCancelBtn = document.getElementById("confirm-cancel-btn");
+const confirmAcceptBtn = document.getElementById("confirm-accept-btn");
 
 const sourceRepoEl = document.getElementById("source-repo");
 const sourceBranchEl = document.getElementById("source-branch");
@@ -42,6 +64,13 @@ const targetRepoEl = document.getElementById("target-repo");
 
 let lastPreview = null;
 let commitFetchDebounceId = null;
+let lastResultText = "Ready.";
+let accessFocusCleanup = null;
+let confirmFocusCleanup = null;
+let confirmResolve = null;
+let confirmCleanup = null;
+
+const TOKEN_PREFIX_REGEX = /^(ghp_|github_pat_)/;
 
 init();
 
@@ -49,6 +78,8 @@ async function init() {
   await enforceAccessGate();
   enforceDarkModeOnly();
   initializeTokenPersistence();
+  hideFilesCard();
+  setPreviewNoteVisible(true);
   clearSourceCommitSelection();
   await refreshRepoAndGroupOptions({ silent: true });
   initializeDropdowns();
@@ -60,9 +91,12 @@ async function init() {
 
   updateModeUi();
   updateSelectionSummary();
+  updateAccessSummary();
+  renderResult("Ready.");
 }
 
 function bindEventHandlers() {
+  bindAccessHandlers();
   bindTokenHandlers();
   bindSourceHandlers();
   bindTargetHandlers();
@@ -72,8 +106,32 @@ function bindEventHandlers() {
   bindResultHandlers();
 }
 
+function bindAccessHandlers() {
+  if (!accessOverlayEl) {
+    return;
+  }
+
+  togglePassphraseBtn.addEventListener("click", () => {
+    const isPassword = accessPassphraseInputEl.type === "password";
+    accessPassphraseInputEl.type = isPassword ? "text" : "password";
+    togglePassphraseBtn.textContent = isPassword ? "Hide" : "Show";
+  });
+
+  accessSubmitBtn.addEventListener("click", async () => {
+    await attemptAccessUnlock();
+  });
+
+  accessPassphraseInputEl.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await attemptAccessUnlock();
+    }
+  });
+}
+
 function bindTokenHandlers() {
   clearTokenBtn.addEventListener("click", clearToken);
+  tokenInput.addEventListener("blur", validateTokenFormat);
 }
 
 function bindSourceHandlers() {
@@ -163,6 +221,10 @@ function bindResultHandlers() {
   clearResultBtn.addEventListener("click", () => {
     writeResult("Ready.");
   });
+
+  copyResultBtn.addEventListener("click", async () => {
+    await copyResultToClipboard();
+  });
 }
 
 function enforceDarkModeOnly() {
@@ -186,6 +248,7 @@ function initializeTokenPersistence() {
   tokenInput.addEventListener("input", syncTokenStorage);
   rememberTokenEl.addEventListener("change", syncTokenStorage);
   updateTokenStorageNote();
+  updateAccessSummary();
 }
 
 function syncTokenStorage() {
@@ -198,6 +261,8 @@ function syncTokenStorage() {
       localStorage.removeItem(TOKEN_PERSIST_KEY);
     }
     updateTokenStorageNote();
+    clearTokenFormatError();
+    updateAccessSummary();
     return;
   }
 
@@ -216,6 +281,7 @@ function syncTokenStorage() {
   localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
   localStorage.removeItem(TOKEN_PERSIST_KEY);
   updateTokenStorageNote();
+  updateAccessSummary();
 }
 
 function clearToken() {
@@ -226,6 +292,8 @@ function clearToken() {
   localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
   rememberTokenEl.checked = false;
   updateTokenStorageNote();
+  clearTokenFormatError();
+  updateAccessSummary();
 }
 
 function clearExpiredRememberedToken() {
@@ -253,31 +321,447 @@ function updateTokenStorageNote() {
     "Token storage: Session only (recommended; cleared when tab closes).";
 }
 
+function setTokenFormatError(message) {
+  tokenFormatErrorEl.textContent = message;
+  tokenFormatErrorEl.hidden = false;
+  tokenInput.setAttribute("aria-invalid", "true");
+}
+
+function clearTokenFormatError() {
+  tokenFormatErrorEl.hidden = true;
+  tokenInput.removeAttribute("aria-invalid");
+}
+
+function validateTokenFormat() {
+  const token = tokenInput.value.trim();
+  if (!token) {
+    clearTokenFormatError();
+    return;
+  }
+  if (!TOKEN_PREFIX_REGEX.test(token)) {
+    setTokenFormatError("Token format looks wrong. Expected ghp_... or github_pat_...");
+    return;
+  }
+  clearTokenFormatError();
+}
+
+function updateAccessSummary() {
+  const token = tokenInput.value.trim();
+  if (!token || !TOKEN_PREFIX_REGEX.test(token)) {
+    accessSummaryChipEl.textContent = "";
+    accessSummaryChipEl.classList.remove("visible");
+    accessSummaryChipEl.setAttribute("aria-hidden", "true");
+    if (accessDetailsEl) {
+      accessDetailsEl.open = true;
+    }
+    return;
+  }
+
+  const tail = token.slice(-4);
+  accessSummaryChipEl.textContent = `Token ****${tail}`;
+  accessSummaryChipEl.classList.add("visible");
+  accessSummaryChipEl.setAttribute("aria-hidden", "false");
+  if (accessDetailsEl.open) {
+    accessDetailsEl.open = false;
+  }
+}
+
+function setButtonLabel(button, label) {
+  button.textContent = label;
+  button.dataset.baseLabel = label;
+}
+
+function createLoadingLabel(label) {
+  if (/^Preview/i.test(label)) {
+    return label.replace(/^Preview/i, "Previewing");
+  }
+  if (/^Apply/i.test(label)) {
+    return label.replace(/^Apply/i, "Applying");
+  }
+  return `${label}...`;
+}
+
+function setButtonLoading(button, isLoading) {
+  const baseLabel = button.dataset.baseLabel || button.textContent;
+  if (isLoading) {
+    button.dataset.baseLabel = baseLabel;
+    button.classList.add("is-loading");
+    button.textContent = createLoadingLabel(baseLabel);
+    return;
+  }
+
+  button.classList.remove("is-loading");
+  if (button.dataset.baseLabel) {
+    button.textContent = button.dataset.baseLabel;
+  }
+}
+
+function setProgress(message) {
+  progressHintEl.textContent = message || "";
+}
+
+function handleScanProgress(scanned, total) {
+  if (!total) {
+    setProgress("No matching env files found.");
+    return;
+  }
+  setProgress(`Scanning ${scanned} of ${total} env files...`);
+}
+
+function setPreviewNoteVisible(visible) {
+  previewNoteEl.classList.toggle("is-hidden", !visible);
+}
+
+function showFilesCard() {
+  filesCardEl.classList.remove("is-hidden");
+}
+
+function hideFilesCard() {
+  filesCardEl.classList.add("is-hidden");
+}
+
 async function enforceAccessGate() {
   if (sessionStorage.getItem(ACCESS_SESSION_KEY) === "yes") {
     return;
   }
 
-  const password = window.prompt("Enter app passphrase:") || "";
-  const hash = await sha256Hex(password);
+  if (!accessOverlayEl) {
+    throw new Error("Access overlay not found.");
+  }
 
+  showAccessOverlay();
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      hideAccessOverlay();
+      resolve();
+    };
+
+    const unlockListener = () => {
+      cleanup();
+      accessSubmitBtn.removeEventListener("access-unlocked", unlockListener);
+    };
+
+    accessSubmitBtn.addEventListener("access-unlocked", unlockListener);
+  });
+}
+
+function showAccessOverlay() {
+  accessErrorEl.hidden = true;
+  accessPassphraseInputEl.value = "";
+  accessPassphraseInputEl.type = "password";
+  togglePassphraseBtn.textContent = "Show";
+  accessOverlayEl.classList.remove("is-hidden");
+  if (appRootEl) {
+    appRootEl.setAttribute("aria-hidden", "true");
+    if ("inert" in appRootEl) {
+      appRootEl.inert = true;
+    }
+  }
+  accessFocusCleanup = trapFocus(accessOverlayEl, accessPassphraseInputEl);
+}
+
+function hideAccessOverlay() {
+  accessOverlayEl.classList.add("is-hidden");
+  if (appRootEl) {
+    appRootEl.removeAttribute("aria-hidden");
+    if ("inert" in appRootEl) {
+      appRootEl.inert = false;
+    }
+  }
+  if (accessFocusCleanup) {
+    accessFocusCleanup();
+    accessFocusCleanup = null;
+  }
+}
+
+async function attemptAccessUnlock() {
+  const password = accessPassphraseInputEl.value || "";
+  const hash = await sha256Hex(password);
   if (hash !== APP_ACCESS_HASH) {
-    document.body.innerHTML = "<main class=\"app\"><section class=\"card\"><h2>Access denied</h2><p>Wrong passphrase.</p></section></main>";
-    throw new Error("Unauthorized access.");
+    accessErrorEl.hidden = false;
+    accessPassphraseInputEl.focus();
+    accessPassphraseInputEl.select();
+    return;
   }
 
   sessionStorage.setItem(ACCESS_SESSION_KEY, "yes");
+  accessSubmitBtn.dispatchEvent(new Event("access-unlocked"));
+}
+
+function trapFocus(container, initialFocusEl) {
+  const handleKeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusable = getFocusableElements(container);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  container.addEventListener("keydown", handleKeydown);
+  if (initialFocusEl) {
+    initialFocusEl.focus();
+  }
+
+  return () => {
+    container.removeEventListener("keydown", handleKeydown);
+  };
+}
+
+function getFocusableElements(container) {
+  return Array.from(
+    container.querySelectorAll(
+      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+    )
+  ).filter((el) => !el.disabled && !el.hidden);
+}
+
+function showConfirmDialog({ title, body, confirmLabel, cancelLabel, requireTyped }) {
+  if (!confirmOverlayEl) {
+    return Promise.resolve(false);
+  }
+
+  confirmTitleEl.textContent = title;
+  confirmBodyEl.textContent = body;
+  confirmAcceptBtn.textContent = confirmLabel || "Confirm";
+  confirmCancelBtn.textContent = cancelLabel || "Cancel";
+  confirmErrorEl.hidden = true;
+  confirmErrorEl.textContent = "";
+
+  if (requireTyped) {
+    confirmInputRowEl.classList.remove("is-hidden");
+    confirmInputEl.value = "";
+    confirmInputEl.placeholder = requireTyped;
+    confirmAcceptBtn.disabled = true;
+  } else {
+    confirmInputRowEl.classList.add("is-hidden");
+    confirmAcceptBtn.disabled = false;
+  }
+
+  confirmOverlayEl.classList.remove("is-hidden");
+  if (appRootEl) {
+    appRootEl.setAttribute("aria-hidden", "true");
+    if ("inert" in appRootEl) {
+      appRootEl.inert = true;
+    }
+  }
+
+  if (confirmFocusCleanup) {
+    confirmFocusCleanup();
+  }
+  confirmFocusCleanup = trapFocus(
+    confirmOverlayEl,
+    requireTyped ? confirmInputEl : confirmAcceptBtn
+  );
+
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+
+    const onCancel = () => {
+      closeConfirmDialog(null);
+    };
+
+    const onConfirm = () => {
+      if (requireTyped) {
+        const typed = confirmInputEl.value.trim();
+        if (typed !== requireTyped) {
+          confirmErrorEl.textContent = "Confirmation text does not match.";
+          confirmErrorEl.hidden = false;
+          confirmInputEl.focus();
+          return;
+        }
+        closeConfirmDialog(typed);
+        return;
+      }
+      closeConfirmDialog(true);
+    };
+
+    const onInput = () => {
+      if (!requireTyped) {
+        return;
+      }
+      const typed = confirmInputEl.value.trim();
+      confirmAcceptBtn.disabled = typed !== requireTyped;
+      if (typed === requireTyped) {
+        confirmErrorEl.hidden = true;
+      }
+    };
+
+    confirmCancelBtn.addEventListener("click", onCancel);
+    confirmAcceptBtn.addEventListener("click", onConfirm);
+    confirmInputEl.addEventListener("input", onInput);
+
+    confirmCleanup = () => {
+      confirmCancelBtn.removeEventListener("click", onCancel);
+      confirmAcceptBtn.removeEventListener("click", onConfirm);
+      confirmInputEl.removeEventListener("input", onInput);
+    };
+  });
+}
+
+function closeConfirmDialog(result) {
+  confirmOverlayEl.classList.add("is-hidden");
+  if (confirmCleanup) {
+    confirmCleanup();
+    confirmCleanup = null;
+  }
+  if (appRootEl) {
+    appRootEl.removeAttribute("aria-hidden");
+    if ("inert" in appRootEl) {
+      appRootEl.inert = false;
+    }
+  }
+  if (confirmFocusCleanup) {
+    confirmFocusCleanup();
+    confirmFocusCleanup = null;
+  }
+  if (confirmResolve) {
+    confirmResolve(result);
+    confirmResolve = null;
+  }
+}
+
+function translateGitHubError(message) {
+  const statusMatch = String(message).match(/\((\d{3})\)/);
+  if (!statusMatch) {
+    return null;
+  }
+  const status = statusMatch[1];
+  switch (status) {
+    case "401":
+      return "Token is invalid or expired. Clear your token and re-enter.";
+    case "403":
+      return "Token lacks required permissions (Contents: write, Pull requests: write).";
+    case "404":
+      return "Repository or branch not found. Check source/target settings.";
+    case "422":
+      return "Branch already exists or ref conflict. Try refreshing and re-running.";
+    default:
+      return null;
+  }
+}
+
+function renderResult(lines, isError = false) {
+  const rawText = Array.isArray(lines) ? lines.join("\n") : String(lines);
+  const friendly = isError ? translateGitHubError(rawText) : null;
+  const displayText = friendly ? `${friendly}\n\nDetails: ${rawText}` : rawText;
+
+  lastResultText = rawText;
+  resultEl.classList.toggle("error", isError);
+  resultEl.innerHTML = "";
+  resultEl.append(buildResultFragment(displayText));
+}
+
+function buildResultFragment(text) {
+  const fragment = document.createDocumentFragment();
+  const lines = String(text).split("\n");
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+  lines.forEach((line) => {
+    const lineEl = document.createElement("div");
+    lineEl.className = "result-line";
+
+    urlRegex.lastIndex = 0;
+    let lastIndex = 0;
+    let match = urlRegex.exec(line);
+    while (match !== null) {
+      const url = match[0];
+      const start = match.index;
+      if (start > lastIndex) {
+        lineEl.append(document.createTextNode(line.slice(lastIndex, start)));
+      }
+      if (url.startsWith("https://github.com/")) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = url;
+        lineEl.append(link);
+      } else {
+        lineEl.append(document.createTextNode(url));
+      }
+      lastIndex = start + url.length;
+      match = urlRegex.exec(line);
+    }
+    if (lastIndex < line.length) {
+      lineEl.append(document.createTextNode(line.slice(lastIndex)));
+    }
+    if (line.length === 0) {
+      lineEl.append(document.createTextNode(" "));
+    }
+    fragment.append(lineEl);
+  });
+
+  return fragment;
+}
+
+async function copyResultToClipboard() {
+  const text = lastResultText || resultEl.textContent || "";
+  if (!text) {
+    return;
+  }
+
+  const originalLabel = copyResultBtn.textContent;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    copyResultBtn.textContent = "Copied";
+  } catch (_error) {
+    copyResultBtn.textContent = "Copy failed";
+  } finally {
+    setTimeout(() => {
+      copyResultBtn.textContent = originalLabel;
+    }, 1400);
+  }
 }
 
 function setBusy(isBusy) {
   previewBtn.disabled = isBusy;
   applyBtn.disabled = isBusy;
   loadCommitsBtn.disabled = isBusy;
+  setButtonLoading(previewBtn, isBusy);
+  setButtonLoading(applyBtn, isBusy);
+  if (!isBusy) {
+    setProgress("");
+  }
 }
 
 function writeResult(lines, isError = false) {
-  resultEl.textContent = Array.isArray(lines) ? lines.join("\n") : String(lines);
-  resultEl.classList.toggle("error", isError);
+  renderResult(lines, isError);
 }
 
 function readConfig() {
@@ -345,11 +829,15 @@ function updateModeUi() {
   fileFilterInputEl.disabled = isCherryPick;
   selectAllFilesBtn.disabled = isCherryPick;
   selectNoneFilesBtn.disabled = isCherryPick;
-  previewBtn.textContent = isCherryPick ? "Preview commit" : "Preview changes";
+  setButtonLabel(previewBtn, isCherryPick ? "Preview commit" : "Preview changes");
+
+  modeHintEl.textContent = isCherryPick
+    ? "Cherry-pick replays a commit from source to target. Source and target must be the same repository."
+    : "";
 
   if (isCherryPick) {
     selectionSummaryEl.textContent = "Cherry-pick applies full commit";
-    applyBtn.textContent = "Apply cherry-pick";
+    setButtonLabel(applyBtn, "Apply cherry-pick");
     fileSelectionListEl.textContent =
       "Not used in cherry-pick mode. Preview shows files touched by selected source commit.";
   }
@@ -359,6 +847,8 @@ function renderFileSelection(preview) {
   lastPreview = preview;
   fileSelectionListEl.innerHTML = "";
   fileFilterInputEl.value = "";
+  showFilesCard();
+  setPreviewNoteVisible(false);
 
   if (!preview || preview.changedFiles.length === 0) {
     fileSelectionListEl.textContent = "No editable files from latest preview.";
@@ -416,7 +906,7 @@ function applyFileFilter() {
 function updateSelectionSummary() {
   if (modeEl.value === "cherry-pick") {
     selectionSummaryEl.textContent = "Cherry-pick applies full commit";
-    applyBtn.textContent = "Apply cherry-pick";
+    setButtonLabel(applyBtn, "Apply cherry-pick");
     return;
   }
 
@@ -428,7 +918,7 @@ function updateSelectionSummary() {
   const allCount = all.length;
   const selectedCount = selected.length;
   selectionSummaryEl.textContent = `Selected ${selectedCount} of ${allCount}`;
-  applyBtn.textContent = selectedCount > 0 ? `Apply (${selectedCount})` : "Apply";
+  setButtonLabel(applyBtn, selectedCount > 0 ? `Apply (${selectedCount})` : "Apply");
 }
 
 function getDetectedScopeForChanges(changes) {
@@ -919,6 +1409,7 @@ async function runPreview() {
     const config = readConfig();
 
     if (config.mode === "cherry-pick") {
+      setProgress("Loading selected source commit...");
       writeResult(["Loading selected source commit for cherry-pick preview..."]);
       const plan = await buildCherryPickPlan(config);
       renderCherryPickPreview(plan);
@@ -938,8 +1429,9 @@ async function runPreview() {
       return;
     }
 
+    setProgress("Fetching source SHA and scanning target files...");
     writeResult(["Fetching source SHA and scanning target files..."]);
-    const preview = await computeChanges(config);
+    const preview = await computeChanges(config, handleScanProgress);
     renderFileSelection(preview);
     const detectedScope = getDetectedScopeForChanges(preview.changedFiles);
 
@@ -971,9 +1463,10 @@ async function runApply() {
       return;
     }
 
+    setProgress("Computing and applying changes...");
     writeResult(["Computing and applying changes atomically..."]);
 
-    const preview = await computeChanges(config);
+    const preview = await computeChanges(config, handleScanProgress);
     if (!lastPreview) {
       renderFileSelection(preview);
     }
@@ -986,9 +1479,12 @@ async function runApply() {
     }
 
     if (!config.yoloMode && config.envScope === "auto" && detectedScope === "mixed") {
-      const accepted = window.confirm(
-        "Selected files span multiple scopes (mixed). Continue applying update?"
-      );
+      const accepted = await showConfirmDialog({
+        title: "Mixed scope detected",
+        body: "Selected files span multiple scopes. Continue applying update?",
+        confirmLabel: "Apply anyway",
+        cancelLabel: "Cancel",
+      });
       if (!accepted) {
         throw new Error("Apply canceled because detected scope is mixed.");
       }
@@ -1071,7 +1567,7 @@ async function runApply() {
   }
 }
 
-async function computeChanges(config) {
+async function computeChanges(config, onProgress) {
   const sourceSha = await resolveSourceCommitSha(config);
 
   if (!sourceSha) {
@@ -1104,6 +1600,10 @@ async function computeChanges(config) {
     .filter((path) => isInEnvScope(path, config.envScope));
 
   const changedFiles = [];
+  if (onProgress) {
+    onProgress(0, envPaths.length);
+  }
+  let scanned = 0;
   for (const path of envPaths) {
     const contentResp = await githubRequest({
       config,
@@ -1118,6 +1618,10 @@ async function computeChanges(config) {
         path,
         newText: updated,
       });
+    }
+    scanned += 1;
+    if (onProgress) {
+      onProgress(scanned, envPaths.length);
     }
   }
 
@@ -1140,9 +1644,13 @@ async function assertDirectCommitConfirmed(config) {
   }
 
   const expected = `${config.targetOwner}/${config.targetRepo}:${config.targetBranch}`;
-  const typed = window.prompt(
-    `Direct commit to protected branch requires confirmation. Type exactly:\n${expected}`
-  );
+  const typed = await showConfirmDialog({
+    title: "Direct commit confirmation",
+    body: `Direct commit to a protected branch requires confirmation. Type exactly: ${expected}`,
+    confirmLabel: "Confirm direct commit",
+    cancelLabel: "Cancel",
+    requireTyped: expected,
+  });
   if (typed !== expected) {
     throw new Error("Direct commit confirmation failed. No changes were applied.");
   }
@@ -1225,6 +1733,8 @@ function renderCherryPickPreview(plan) {
   lastPreview = null;
   fileFilterInputEl.value = "";
   fileSelectionListEl.innerHTML = "";
+  showFilesCard();
+  setPreviewNoteVisible(false);
 
   if (plan.changedPaths.length === 0) {
     fileSelectionListEl.textContent = "Selected source commit has no file changes to replay.";
@@ -1249,6 +1759,7 @@ function renderCherryPickPreview(plan) {
 
 async function runCherryPickApply(config) {
   assertCherryPickSameRepo(config);
+  setProgress("Applying cherry-pick to target branch...");
   writeResult(["Applying cherry-pick to target branch..."]);
 
   const plan = await buildCherryPickPlan(config);

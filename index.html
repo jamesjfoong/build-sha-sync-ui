@@ -54,7 +54,63 @@
         <path d="M20 20v-6h-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       </symbol>
     </svg>
-    <main class="app">
+    <div
+      id="access-overlay"
+      class="access-overlay is-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="access-title"
+    >
+      <div class="access-dialog" role="document">
+        <div class="access-head">
+          <p class="eyebrow">Secure Access</p>
+          <h2 id="access-title">Enter passphrase</h2>
+        </div>
+        <p class="notice">This tool is gated. Enter the shared passphrase to continue.</p>
+        <label>
+          Passphrase
+          <div class="password-row">
+            <input
+              id="access-passphrase"
+              name="accessPassphrase"
+              type="password"
+              autocomplete="current-password"
+              inputmode="text"
+              required
+            />
+            <button type="button" id="toggle-passphrase-btn" class="secondary small">Show</button>
+          </div>
+        </label>
+        <p id="access-error" class="field-error" role="alert" hidden>Wrong passphrase. Try again.</p>
+        <div class="actions">
+          <button type="button" id="access-submit-btn">Unlock</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="confirm-overlay"
+      class="confirm-overlay is-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+    >
+      <div class="confirm-dialog" role="document">
+        <h2 id="confirm-title">Confirm</h2>
+        <p id="confirm-body" class="notice"></p>
+        <label id="confirm-input-row" class="is-hidden">
+          Type to confirm
+          <input id="confirm-input" type="text" autocomplete="off" />
+        </label>
+        <p id="confirm-error" class="field-error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="button" id="confirm-cancel-btn" class="secondary">Cancel</button>
+          <button type="button" id="confirm-accept-btn">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <main class="app" id="app-root">
       <header class="hero">
         <div class="hero-top">
           <div>
@@ -68,7 +124,7 @@
         </div>
       </header>
 
-      <section class="card">
+      <section class="card form-card">
         <form id="sync-form">
           <details id="access-details" class="form-section access-section" open>
             <summary class="section-summary">
@@ -95,6 +151,9 @@
                   required
                 />
               </label>
+              <p id="token-format-error" class="field-error" role="alert" hidden>
+                Token format looks wrong. Expected ghp_... or github_pat_...
+              </p>
 
               <div class="actions-inline">
                 <button type="button" id="clear-token-btn" class="secondary">Clear token</button>
@@ -216,6 +275,7 @@
               </label>
             </div>
 
+            <p id="mode-hint" class="notice mode-hint" aria-live="polite"></p>
           </div>
 
           <details class="advanced">
@@ -230,19 +290,20 @@
                 <input id="target-owner" type="text" value="GDP-ADMIN" required />
               </label>
             </div>
-              <label>
-                Target repo
-                <input id="target-repo" type="text" value="CATAPA-APPS-STATE" required />
-              </label>
 
-              <label>
-                Commit message format
-                <textarea id="commit-message-template" rows="4">ci(scope): {commit_sha_7_digit} to dev</textarea>
-              </label>
-              <label class="checkbox-row">
-                <input id="yolo-mode" type="checkbox" />
-                YOLO mode (skip safety confirmations)
-              </label>
+            <label>
+              Target repo
+              <input id="target-repo" type="text" value="CATAPA-APPS-STATE" required />
+            </label>
+
+            <label>
+              Commit message format
+              <textarea id="commit-message-template" rows="4">ci(scope): {commit_sha_7_digit} to dev</textarea>
+            </label>
+            <label class="checkbox-row">
+              <input id="yolo-mode" type="checkbox" />
+              YOLO mode - skip all safety confirmations (high risk)
+            </label>
             <p class="notice">
               Placeholders: {commit_sha_7_digit}, {shortSha}, {sourceRef}, {sourceOwner}, {sourceRepo}, {sourceBranch}, {targetGroup}, {envScope}, {scope}, {targetRepo}, {targetBranch}
             </p>
@@ -259,6 +320,7 @@
                 <p class="section-note">Preview shows what will change before any commit happens.</p>
               </div>
             </div>
+            <p id="preview-note" class="notice">Run Preview first to see files.</p>
             <div class="actions">
               <button type="button" id="preview-btn" class="secondary">Preview changes</button>
               <button type="submit" id="apply-btn">Apply</button>
@@ -267,15 +329,19 @@
         </form>
       </section>
 
-      <section class="card">
+      <section class="card result-card">
         <div class="result-head">
           <h2>Result</h2>
-          <button type="button" id="clear-result-btn" class="secondary">Clear</button>
+          <div class="actions-inline">
+            <button type="button" id="copy-result-btn" class="secondary">Copy</button>
+            <button type="button" id="clear-result-btn" class="secondary">Clear</button>
+          </div>
         </div>
-        <pre id="result">Ready.</pre>
+        <p id="progress-hint" class="notice progress-hint" aria-live="polite"></p>
+        <div id="result" class="result-panel" role="status" aria-live="polite">Ready.</div>
       </section>
 
-      <section class="card">
+      <section class="card is-hidden files-card" id="files-card">
         <div class="result-head">
           <h2>Files to update</h2>
           <div class="actions-inline">

@@ -69,6 +69,12 @@ body {
   gap: 1.35rem;
 }
 
+.form-card,
+.result-card,
+.files-card {
+  min-height: 0;
+}
+
 .hero h1 {
   margin: 0.3rem 0 0.5rem;
   font-size: clamp(1.8rem, 3vw, 2.6rem);
@@ -182,11 +188,33 @@ label {
 
 .summary-chip {
   display: none;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.summary-chip.visible {
+  display: inline-flex;
 }
 
 .section-body {
   display: grid;
   gap: 0.85rem;
+}
+
+.password-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.password-row input {
+  flex: 1;
 }
 
 .section-head {
@@ -426,9 +454,47 @@ select + .select2 {
   font-size: 0.88rem;
 }
 
+.field-error {
+  margin: 0.2rem 0 0;
+  color: var(--danger);
+  font-size: 0.86rem;
+}
+
+.mode-hint {
+  margin-top: 0.35rem;
+}
+
 button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+button.small {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+button.is-loading {
+  position: relative;
+  padding-left: 2.1rem;
+}
+
+button.is-loading::before {
+  content: "";
+  position: absolute;
+  left: 0.75rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2px solid rgba(226, 232, 240, 0.4);
+  border-top-color: rgba(226, 232, 240, 0.95);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 button,
@@ -448,7 +514,7 @@ h2 {
   margin: 0;
 }
 
-pre {
+.result-panel {
   margin: 0;
   padding: 0.8rem;
   min-height: 120px;
@@ -458,6 +524,22 @@ pre {
   overflow: auto;
   white-space: pre-wrap;
   line-height: 1.35;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.92rem;
+}
+
+.result-line {
+  display: block;
+}
+
+.result-panel a {
+  color: var(--link);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.result-panel a:hover {
+  text-decoration: underline;
 }
 
 .result-head {
@@ -532,6 +614,68 @@ pre {
   color: var(--danger);
 }
 
+.progress-hint {
+  min-height: 1rem;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+.access-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  z-index: 50;
+}
+
+.access-dialog {
+  width: min(420px, 92vw);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(15, 23, 42, 0.98));
+  border: 1px solid var(--card-outline);
+  border-radius: 16px;
+  padding: 1.2rem 1.3rem 1.1rem;
+  box-shadow: var(--card-shadow);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.access-head h2 {
+  margin: 0.2rem 0 0.2rem;
+  font-size: 1.35rem;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.75);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  z-index: 55;
+}
+
+.confirm-dialog {
+  width: min(520px, 92vw);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(15, 23, 42, 0.98));
+  border: 1px solid var(--card-outline);
+  border-radius: 16px;
+  padding: 1.2rem 1.3rem 1.1rem;
+  box-shadow: var(--card-shadow);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.confirm-dialog h2 {
+  margin: 0.2rem 0 0.2rem;
+  font-size: 1.2rem;
+}
+
 @media (max-width: 760px) {
   .app {
     margin: 1.2rem auto 1.6rem;
@@ -591,6 +735,43 @@ pre {
 
   .selection-summary {
     justify-self: start;
+  }
+}
+
+@media (min-width: 980px) {
+  body {
+    overflow: hidden;
+  }
+
+  .app {
+    height: 100vh;
+    margin: 0 auto;
+    padding: 1.6rem 0 1.6rem;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "hero hero"
+      "form result"
+      "form files";
+  }
+
+  .hero {
+    grid-area: hero;
+  }
+
+  .form-card {
+    grid-area: form;
+    overflow: auto;
+  }
+
+  .result-card {
+    grid-area: result;
+    overflow: auto;
+  }
+
+  .files-card {
+    grid-area: files;
+    overflow: auto;
   }
 }
 
