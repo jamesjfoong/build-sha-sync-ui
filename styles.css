@@ -63,7 +63,7 @@ body {
 }
 
 .app {
-  width: min(960px, 92vw);
+  width: min(1400px, 96vw);
   margin: 2.2rem auto 2.8rem;
   display: grid;
   gap: 1.35rem;
@@ -99,7 +99,7 @@ body {
 .subtitle {
   margin: 0;
   color: var(--muted);
-  max-width: 48ch;
+  max-width: 60ch;
 }
 
 .card {
@@ -358,8 +358,19 @@ textarea {
   background: var(--panel-bg);
 }
 
-select + .select2 {
+select + .select2,
+.select2-container {
+  width: 100% !important;
+}
+
+.select2-container .select2-selection--single {
   width: 100%;
+}
+
+.select2-dropdown {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
 }
 
 .select2-container--default .select2-selection--single {
@@ -564,16 +575,37 @@ h2 {
   gap: 0.35rem;
 }
 
-.file-selection-list {
+  .file-selection-list {
   margin-top: 0.6rem;
   display: grid;
   gap: 0.4rem;
-  max-height: 260px;
+  max-height: 300px;
   overflow: auto;
   border: 1px solid var(--panel-border);
   border-radius: 10px;
   padding: 0.55rem;
   background: var(--result-bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) var(--panel-bg);
+}
+
+.file-selection-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.file-selection-list::-webkit-scrollbar-track {
+  background: var(--panel-bg);
+  border-radius: 4px;
+}
+
+.file-selection-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+.file-selection-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 .file-item {
@@ -740,13 +772,15 @@ h2 {
 
 @media (min-width: 980px) {
   body {
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .app {
-    height: 100vh;
-    margin: 0 auto;
-    padding: 1.6rem 0 1.6rem;
+    height: calc(100vh - 3.2rem);
+    min-height: 600px;
+    margin: 1.6rem auto;
+    padding: 0;
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
     grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
@@ -762,16 +796,49 @@ h2 {
   .form-card {
     grid-area: form;
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) var(--panel-bg);
   }
 
   .result-card {
     grid-area: result;
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) var(--panel-bg);
   }
 
   .files-card {
     grid-area: files;
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) var(--panel-bg);
+  }
+
+  .form-card::-webkit-scrollbar,
+  .result-card::-webkit-scrollbar,
+  .files-card::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .form-card::-webkit-scrollbar-track,
+  .result-card::-webkit-scrollbar-track,
+  .files-card::-webkit-scrollbar-track {
+    background: var(--panel-bg);
+    border-radius: 4px;
+  }
+
+  .form-card::-webkit-scrollbar-thumb,
+  .result-card::-webkit-scrollbar-thumb,
+  .files-card::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 4px;
+  }
+
+  .form-card::-webkit-scrollbar-thumb:hover,
+  .result-card::-webkit-scrollbar-thumb:hover,
+  .files-card::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
   }
 }
 
