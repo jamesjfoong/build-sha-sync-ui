@@ -75,7 +75,6 @@ const TOKEN_PREFIX_REGEX = /^(ghp_|github_pat_)/;
 init();
 
 async function init() {
-  await enforceAccessGate();
   enforceDarkModeOnly();
   initializeTokenPersistence();
   hideFilesCard();
