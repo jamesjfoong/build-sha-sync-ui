@@ -481,8 +481,13 @@ button:disabled {
 }
 
 button.small {
-  padding: 0.3rem 0.6rem;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
 }
 
 button.is-loading {
@@ -563,16 +568,18 @@ h2 {
 
 .actions-inline {
   display: flex;
-  gap: 0.45rem;
+  gap: 0.4rem;
   align-items: center;
   flex-wrap: wrap;
 }
 
 .actions-inline button,
 .actions-inline a {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
 }
 
   .file-selection-list {
@@ -774,6 +781,7 @@ h2 {
   body {
     overflow-y: auto;
     overflow-x: hidden;
+    -ms-overflow-style: scrollbar;
   }
 
   .app {
@@ -798,6 +806,7 @@ h2 {
     overflow: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--line) var(--panel-bg);
+    -ms-overflow-style: scrollbar;
   }
 
   .result-card {
@@ -805,6 +814,7 @@ h2 {
     overflow: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--line) var(--panel-bg);
+    -ms-overflow-style: scrollbar;
   }
 
   .files-card {
@@ -812,6 +822,7 @@ h2 {
     overflow: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--line) var(--panel-bg);
+    -ms-overflow-style: scrollbar;
   }
 
   .form-card::-webkit-scrollbar,
